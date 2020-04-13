@@ -15,6 +15,12 @@ from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
 
 from pylab import *
 
+import time
+from scipy.spatial import distance
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import pairwise_distances
+from sklearn.metrics import pairwise_distances_argmin
+
 from .transformation import *
 
 class Timer():
@@ -206,6 +212,50 @@ def calculate_distances_matrix(y_true, y_predicted):
 
     return dist
 
+def convert_vector_to_matrix(vec, features, len_seq):
+    tracks = []
+    total = len(vec)
+    
+    for x in range(total):
+        seq = np.reshape(vec[x], len_seq*features) 
+        tracks.append(seq)    
+    return tracks
+
+def convert_matrix_to_vec(mat, features):
+    lst = []
+    
+    rows = mat.shape[0]
+    cols = mat.shape[1]
+    
+    mat = np.array(mat)
+    
+    for i in range(rows):
+        end_idx = 0
+        for j in range(0, cols, features):
+            end_idx = j+features
+            hit = mat[i, j:end_idx]
+            #lst.append(np.reshape(hit, features))
+            lst.append(hit)
+    return lst
+
+def to_frame(data):
+    return pd.DataFrame(data)
+
+
+
+def get_nearest_preds(y_true, y_predicted):
+    new_pred = []
+    total = y_predicted.shape[0]
+    
+    for pred in y_predicted:
+        pred = pred.reshape(1,3)
+        # y_true is of bag of hits
+        nearest_hit = nearest_hit_modified(pred, y_true, silent=True)
+        new_pred.append(nearest_hit)
+
+    return np.array(new_pred).reshape(total, 3)
+
+
 ##########################################
 ####                                  ####                      
 ####   FUNCTIONS FOR VISUALIZATION    ####
@@ -286,6 +336,7 @@ def conv_slice_xyz_to_rhoetaphi(df_in, n_hits = 5):
 def track_plot_xyz(list_of_df_in = [],
                    n_hits = 5,
                    cylindrical = False,
+                   auto_open=False,
                    **kwargs):
  
     # deep copy to avoid linking with the original dataframe addresss
@@ -423,7 +474,7 @@ def track_plot_xyz(list_of_df_in = [],
     #init_notebook_mode(connected=True)
     if kwargs.get('path'):
         path = kwargs.get('path')
-        fig.write_html(path, auto_open=True)  
+        fig.write_html(path, auto_open=auto_open)  
     
     return fig     
 #function to plot more than one dataframes
