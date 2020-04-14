@@ -18,7 +18,7 @@ from keras.models import Sequential, load_model
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.utils import plot_model   
 
-from core.utils.utils import Timer
+from core.utils.utils import *
 
 def get_unique_name(name):
 
@@ -179,20 +179,20 @@ class BaseModel():
             prediction_seqs.append(predicted)
         return prediction_seqs
  
-    def predict_full_sequences(self, data, y_true, hits_len):
+    def predict_full_sequences(self, x_test, y_true, hits_len):
 
         timer = Timer()
         timer.start() 
         print('[Model] Predicting Sequences Started')
 
-        total = len(data)
+        total = len(x_test)
         
         correct = 0
         incorrect = 0
         pred_sequences = []
         
         for j in range(total):       
-            curr_frame = data[j]
+            curr_frame = x_test[j]
             predicted = []
             for i in range(hits_len):            
                 pred = self.model.predict(curr_frame[np.newaxis,:,:])                         
@@ -209,56 +209,52 @@ class BaseModel():
 
         return pred_sequences
 
-    def predict_full_sequences_nearest(self, x_test, y_true, hits_len):
+    def predict_full_sequences_nearest(self, x_test, y_true, hits_len=6, num_features=3):
         #Shift the window by 1 new prediction each time, re-run predictions on new window
         timer = Timer()
         timer.start()       
-         
+
         print('[Model] Predicting Sequences with Nearest Started')
 
         total = len(x_test)
-        
-        correct = 0
-        incorrect = 0
+
         pred_sequences = []
         
-        for j in range(total):       
-            curr_frame = x_test[j]
-            #print(curr_frame)
-            predicted = []
-            #y_true = y_true[j:hits_len]
-            for i in range(hits_len):            
-                pred = self.model.predict(curr_frame[np.newaxis,:,:])
+        bag_of_hits = np.array(convert_matrix_to_vec(y_true, num_features))
 
-                nearest_pred, idx = self.nearest_hit(pred, y_true, silent=True)
-               
-                #y_true = np.delete(y_true, idx, 0)
+        y_true = np.array(y_true)
+        count_correct = np.zeros(hits_len)
         
-                '''            
-                d1 = calculate_distances_vec(y_true[i], nearest_pred)
-                d2 = calculate_distances_vec(y_true[i], y_pred)
-
-                if d1<d2:
-                    predicted.append(nearest_pred)
-                    incorrect=+1
-                elif d1>d2:
-                    predicted.append(pred)
-                    incorrect=+1
-                elif d1==d2:          
-                    correct=+1                
-                '''
-                predicted.append(nearest_pred)
+        for j in range(total):
+            curr_frame = x_test[j]
+            curr_track = y_true[j]
+            predicted = []
+            begin = 0
+            
+            for i in range(hits_len):
+                end = begin+num_features
+                curr_hit = curr_track[begin:end]
+                begin = end
+                
+                y_pred = self.model.predict(curr_frame[np.newaxis,:,:])
+                near_pred, idx = self.nearest_hit(y_pred, bag_of_hits, silent=True)
+                #bag_of_hits = np.delete(bag_of_hits, target_hit_index, 0)
+                
+                #if np.logical_and(curr_hit, near_pred).all():
+                if np.array_equal(curr_hit, near_pred):
+                    count_correct[i]=+1
+                    
+                predicted.append(near_pred)
                 curr_frame = curr_frame[1:]
                 # inserta um  valor np.insert(array, index, value, axes)
                 curr_frame = np.insert(curr_frame, [3], predicted[-1], axis=0)
-                #print(curr_frame, predicted[-1])
-            
+
             pred_sequences.append(predicted)
 
         print('[Model] Prediction Finished.')
         timer.stop()
-
-        return pred_sequences
+        
+        return pred_sequences, count_correct
 
     def nearest_hit(self, hit, hits,
                              silent = True,
@@ -282,7 +278,8 @@ class BaseModel():
 
         # get hits coordinates 
         real_hit = hits[target_hit_index, :]
-        
+        real_hit = np.array(real_hit)
+
         # removing the hit from bag
         #hits = np.delete(hits, target_hit_index, 0)
         
