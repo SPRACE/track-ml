@@ -2,6 +2,7 @@ __author__ = "Steve Ataucuri"
 __copyright__ = "Sprace.org.br"
 __version__ = "1.0.0"
 
+import os
 import numpy as np
 import pandas as pd
 
@@ -20,7 +21,7 @@ class KindNormalization(Enum):
 	Zscore = 2,
 	Polar = 3,
 	Nothing = 4
-
+    
 class Dataset():
 	def __init__(self, input_path, train_size, cylindrical, hits, kind_normalization):
 
@@ -30,6 +31,7 @@ class Dataset():
 		dataframe = pd.read_csv(input_path, header=0, engine='python')
 		print("[Data] Data loaded from ", input_path)
 		self.kind = kind_normalization
+
 		if self.kind == KindNormalization.Scaling:
 			self.x_scaler = MinMaxScaler(feature_range=(0, 1))
 			self.y_scaler = MinMaxScaler(feature_range=(0, 1)) 			
@@ -37,6 +39,7 @@ class Dataset():
 		elif kind_normalization == KindNormalization.Zscore:
 			self.x_scaler = StandardScaler() # mean and standart desviation
 			self.y_scaler = StandardScaler() # mean and standart desviation
+			self.y_scaler_test = StandardScaler()
 			
 		'''
 				if normalise:            
@@ -47,10 +50,15 @@ class Dataset():
 		'''
 		self.start_hits = 9
 		self.interval = 11
+		self.decimals = 4
 
 		self.data = dataframe.iloc[:, self.start_hits:]
 		#self.self = 0
 
+		if cylindrical:
+			self.coord_name = 'cylin'
+		else:
+			self.coord_name = 'xyz'
 		self.cylindrical = cylindrical
 
 		begin_coord = 0
@@ -92,6 +100,7 @@ class Dataset():
 		print("[Data] Data set shape ", self.data.shape)		
 		print("[Data] Data train shape ", self.data_train.shape)		
 		print("[Data] Data test shape ", self.data_test.shape)
+		print("[Data] Data coordinates ", self.coord_name)
 
 	def prepare_training_data(self, feature_type, normalise=True, cylindrical=False):
 
@@ -222,14 +231,19 @@ class Dataset():
 			x_data = pd.DataFrame(xscaled)			
 
 			yscaled = self.y_scaler.fit_transform(Y)
-			y_data = pd.DataFrame(yscaled)	
+			y_data = pd.DataFrame(yscaled)
+
+			#if save_params:
+			#	self.save_scale_param()	
 		else:
 			x_data = pd.DataFrame(X)			
 			y_data = pd.DataFrame(Y)				
 
+		#return pd.DataFrame(x_data).round(self.decimals) , pd.DataFrame(y_data).round(self.decimals)
 		return pd.DataFrame(x_data) , pd.DataFrame(y_data)
 
-	def get_testing_data(self, n_hit_in, n_hit_out, n_features, normalise=False):
+
+	def get_testing_data(self, n_hit_in, n_hit_out, n_features, normalise=False, xscaler=None, yscaler=None):
 
 		X , Y = [],[]
 
@@ -245,16 +259,45 @@ class Dataset():
 
 		x_data, y_data = 0,0
 		# normalization just of features.
-		if normalise:
+
+		if normalise and xscaler is None:
+			# X must be scaled with train scaled parameters according to literature
+			# must be transform data with previous mean, std
+			xscaled = self.x_scaler.transform(X)
+			x_data = pd.DataFrame(xscaled)
+
+			# no scaled Y
+			#yscaled = self.y_scaler_test.fit_transform(Y)
+			y_data = pd.DataFrame(Y)
+
+		elif normalise and (xscaler is not None or yscaler is not None):
+			print('not is none')
+			# we load a previous scaler mean and std
+			self.x_scaler = xscaler
+			self.y_scaler = yscaler
+
 			xscaled = self.x_scaler.fit_transform(X)
-			x_data = pd.DataFrame(xscaled)			
+			x_data = pd.DataFrame(xscaled)
 
-			yscaled = self.y_scaler.fit_transform(Y)
-			y_data = pd.DataFrame(yscaled)	
+			# no scaled Y
+			#yscaled = self.y_scaler_test.fit_transform(Y)
+			y_data = pd.DataFrame(Y)
+
+		elif not normalise and (xscaler is not None or yscaler is not None):
+			print('normalise false and is none')
+			# we load a previous scaler mean and std
+			self.x_scaler = xscaler
+			self.y_scaler = yscaler
+
+			x_data = pd.DataFrame(X)
+			# no scaled Y
+			#yscaled = self.y_scaler_test.fit_transform(Y)
+			y_data = pd.DataFrame(Y)			
 		else:
-			x_data = pd.DataFrame(X)			
-			y_data = pd.DataFrame(Y)				
+			x_data = pd.DataFrame(X)
+			y_data = pd.DataFrame(Y)
 
+		#return pd.DataFrame(x_data).round(self.decimals) , pd.DataFrame(y_data).round(self.decimals)
 		return pd.DataFrame(x_data) , pd.DataFrame(y_data)
 
 	def get_test_data2(self, seq_len, normalise=False):
@@ -424,5 +467,46 @@ class Dataset():
 	def inverse_transform_y(self, data):
 		return self.y_scaler.inverse_transform(data)
 
+	def inverse_transform_test_y(self, data):
+		return pd.DataFrame(self.y_scaler_test.inverse_transform(data))
+
 	def inverse_transform_x(self, data):
 		return self.x_scaler.inverse_transform(data)
+
+	def scale_parameters(self):
+		return self.x_scaler.mean_,  self.x_scaler.var_, self.y_scaler.mean_, self.y_scaler.var_
+
+	def scale_data(self, array, mean,stds):
+		return (array-mean)/stds
+
+	def save_scale_param(self, path):   
+
+	    np.save(os.path.join(path, 'x_scaler_scale.npy'), np.asarray(self.x_scaler.scale_))
+	    np.save(os.path.join(path, 'x_scaler_mean.npy'), np.asarray(self.x_scaler.mean_))
+	    np.save(os.path.join(path, 'x_scaler_var.npy'), np.asarray(self.x_scaler.var_))
+	    
+	    np.save(os.path.join(path, 'y_scaler_scale.npy'), np.asarray(self.y_scaler.scale_))    
+	    np.save(os.path.join(path, 'y_scaler_mean.npy'), np.asarray(self.y_scaler.mean_))
+	    np.save(os.path.join(path, 'y_scaler_var.npy'), np.asarray(self.y_scaler.var_))
+
+	def load_scale_param(self, path):
+	    x_scaler = StandardScaler()
+	    y_scaler = StandardScaler()
+
+	    x_scale = np.load(path + '/x_scaler_scale.npy')    
+	    x_mean = np.load(path + '/x_scaler_mean.npy')
+	    x_var = np.load(path + '/x_scaler_var.npy')
+	    
+	    y_scale = np.load(path + '/y_scaler_scale.npy')
+	    y_mean = np.load(path + '/y_scaler_mean.npy')
+	    y_var = np.load(path + '/y_scaler_var.npy')
+	    
+	    x_scaler.scale_ = x_scale
+	    x_scaler.mean_ = x_mean
+	    x_scaler.var_ = x_var
+	    
+	    y_scaler.scale_ = y_scale
+	    y_scaler.mean_ = y_mean
+	    y_scaler.var_ = y_var
+	    
+	    return x_scaler, y_scaler

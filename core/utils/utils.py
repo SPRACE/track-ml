@@ -22,6 +22,11 @@ from sklearn.metrics import pairwise_distances
 from sklearn.metrics import pairwise_distances_argmin
 
 from .transformation import *
+import warnings
+
+import uuid
+import shortuuid
+
 
 class Timer():
  
@@ -262,6 +267,9 @@ def get_nearest_preds(y_true, y_predicted):
 ####                                  ####
 ##########################################
 
+pivot = 11
+shift = 1
+
 def plot_distances(d1, d2, save_to):
     
     sns.set(rc={"figure.figsize": (14, 10)})
@@ -399,7 +407,8 @@ def track_plot_xyz(list_of_df_in = [],
     
     for i in range(len_list_df):
         try:
-            df_name = str(list_of_df[i].name)
+            #df_name = str(list_of_df[i].name)
+            df_name = str(list_of_df[i].columns.name)
             #warnings.warn(df_name, RuntimeWarning, stacklevel=2)
         except:
             df_name = 'track[' + str(i) + ']'
@@ -547,7 +556,8 @@ def track_plot_list(list_of_df = [], **kwargs):
     
     for i in range(len_list_df):
         try:
-            df_name = str(list_of_df[i].name)
+            #df_name = str(list_of_df[i].name)
+            df_name = str(list_of_df[i].columns.name)
         except:
             df_name = 'track[' + str(i) + ']'
             warnings.warn('For a better visualization, set the name of dataframe to plot:'
@@ -734,3 +744,14 @@ def track_plot_id(df_tb_plt, **kwargs):
                pivot=pivot)
 
 
+def get_unique_name(name):
+
+    shortuuid.set_alphabet("0123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+    shortuuid.ShortUUID().random(length=16)
+    uid = uuid.uuid5(uuid.NAMESPACE_DNS, name)
+    enc = shortuuid.encode(uid)
+    return enc
+
+def get_decryp_name(key):
+    dec = shortuuid.decode(key)
+    return dec
