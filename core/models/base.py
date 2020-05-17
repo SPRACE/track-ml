@@ -34,7 +34,8 @@ class BaseModel():
         self.cylindrical = configs['data']['cylindrical']
         self.epochs = configs['training']['epochs']
         self.batch_size = configs['training']['batch_size']
-
+        self.validation = configs['training']['validation']
+        
         path_to, filename = os.path.split(configs['data']['filename'])
         #print(get_unique_name(filename))
         #self.orig_ds_name = configs['data']['filename']
@@ -99,7 +100,7 @@ class BaseModel():
         self.model.save(filepath)
         print('[Model] Model for inference saved at %s' % filepath)
 
-    def train(self, x, y, epochs, batch_size):
+    def train(self, x, y, epochs, batch_size, validation):
         timer = Timer()
         timer.start()
         print('[Model] Training Started')
@@ -107,16 +108,17 @@ class BaseModel():
         #print('[Model] Shape of data train: ', x.shape) 
         #save_fname = os.path.join(save_dir, '%s-e%s.h5' % (dt.datetime.now().strftime('%d%m%Y-%H%M%S'), str(epochs)))
         callbacks = [
-            EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=10),
+            EarlyStopping(monitor='loss', mode='min', verbose=1),
             ModelCheckpoint(filepath=self.save_fnameh5, monitor='val_loss', mode='min', save_best_only=True)
         ]
         history = self.model.fit(
             x,
             y,
-            validation_split=0.5,
+            validation_split=validation,
             epochs=epochs,
             batch_size=batch_size,
-            callbacks=callbacks
+            callbacks=callbacks,
+            shuffle=False
         )
 
         if self.save == True:
@@ -378,8 +380,9 @@ class BaseModel():
                 near_pred = hits[idx]
 
                 # if curr_hit is in cartesian coord, near_pred must be in cartesian coord too
-                if np.isclose(curr_hit, near_pred, atol=0.01).all():
-                    count_correct[i]=+1
+                # very small numbers are differents or equals
+                if np.isclose(curr_hit, near_pred, atol=tol).all():
+                    count_correct[i]+=1
                     
                 if verbose:
                     print('pred:', y_pred)

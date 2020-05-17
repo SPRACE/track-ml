@@ -34,7 +34,7 @@ def evaluate_model(history, model, x, y, save_to):
     plt.show()
 
 
-def evaluate_training(history, save_to):
+def evaluate_training(history, save_to, keyword):
     history = history.history
 
     #print('Validation accuracy: {acc}, loss: {loss}'.format(
@@ -55,7 +55,7 @@ def evaluate_training(history, save_to):
     plt.xlabel('epoch')
     plt.legend(['train', 'test'], loc='upper left')
 
-    save_fname = os.path.join(save_to, 'evaluation-metrics.png') 
+    save_fname = os.path.join(save_to, 'evaluation-metrics_%s.png' % keyword) 
     plt.savefig(save_fname)
     plt.show()
     # summarize history for loss
@@ -67,7 +67,7 @@ def evaluate_training(history, save_to):
     plt.ylabel('loss')
     plt.xlabel('epoch')
     plt.legend(['train', 'test val'], loc='upper left')
-    save_fname = os.path.join(save_to, 'evaluation-loss.png') 
+    save_fname = os.path.join(save_to, 'evaluation-loss_%s.png' % keyword) 
     plt.savefig(save_fname)
     plt.show()    
 
@@ -263,3 +263,7 @@ def summarize_scores_axes(mses, rmses, r2s):
         print('\tMSE:[%.2f, %.2f, %.2f]' % (mse[0], mse[1], mse[2]))
         print('\tRMSE:[%.2f, %.2f, %.2f]' % (rmse[0], rmse[1], rmse[2]))
         counter+=1
+
+def save_numpy_values(array_values, path, name_file ):   
+
+    np.save(os.path.join(path, name_file), np.asarray(array_values))     

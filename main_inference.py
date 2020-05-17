@@ -25,9 +25,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="LSTM implementation ")
 
     # Dataset setting
-    parser.add_argument('--config', type=str, default="config.json", help='Configuration file')
+    parser.add_argument('--config', type=str, default="default_config.json", help='Configuration file')
     parser.add_argument('--dataset', type=str, help='Path to dataset')
     parser.add_argument('--cylindrical', type=str, help='Type of Coordenates system')
+    parser.add_argument('--load', type=str, help='this param load model')
+    
     # parse the arguments
     args = parser.parse_args()
 
@@ -76,36 +78,42 @@ def main():
     if os.path.isdir(output_path) == False: 
         os.mkdir(output_path)
          
-        if os.path.isdir(output_encry) == False: 
-            os.mkdir(output_encry)
+    if os.path.isdir(output_encry) == False: 
+        os.mkdir(output_encry)
 
     if os.path.isdir(output_logs) == False:
         os.mkdir(output_logs)      
     
     time_steps =  configs['model']['layers'][0]['input_timesteps']  # the number of points or hits
     num_features = configs['model']['layers'][0]['input_features']  # the number of features of each hits
+    optim = configs['model']['optimizer']
+    neurons = configs['model']['layers'][0]['neurons']
 
     split = configs['data']['train_split']  # the number of features of each hits
     cylindrical = configs['data']['cylindrical']  # set to polar or cartesian coordenates
     normalise = configs['data']['normalise'] 
     num_hits = configs['data']['num_hits']
     type_pred = configs['testing']['type_prediction']
+    tolerance = configs['testing']['tolerance']
+    loadModel = configs['training']['load_model']
 
+    # we set preference to params by bash commands
     if args.dataset is not None:
         data_file = args.dataset
         configs['data']['filename'] = data_file     
     if args.cylindrical is not None:
         cylindrical = True if args.cylindrical == "True" else False
         configs['data']['cylindrical'] = cylindrical    
+    if args.load is not None:
+        loadModel = True if args.load == "True" else False
+        configs['training']['load_model'] = loadModel  
 
     model = manage_models(configs)
 
     if model is None:
         print('Please instance model')
         return
-
-    loadModel = configs['training']['load_model']
-    
+   
     if loadModel:       
         if not model.load_model():
             print('[Error] please change the config file : load_model')
@@ -126,8 +134,8 @@ def main():
                                        xscaler=x_scaler, yscaler=y_scaler)
 
     # a short dataset
-    X_test = X_test.iloc[0:100,]
-    y_test = y_test[0:100]
+    #X_test = X_test.iloc[0:1000,]
+    #y_test = y_test[0:1000]
 
     print('[Data] shape data X_test.shape:', X_test.shape)
     print('[Data] shape data y_test.shape:', y_test.shape)
@@ -164,7 +172,7 @@ def main():
         elif type_pred == "nearest": 
             y_pred, correct = model.predict_full_sequences_nearest(X_test_, y_test, data, BagOfHits.Layer, None, seq_len, 
                                                              normalise=True, cylindrical=False,
-                                                             verbose=False)
+                                                             verbose=False, tol=tolerance)
         else:
             print('no algorithm defined to predict')
 
@@ -190,6 +198,13 @@ def main():
     else:
         coord = 'xyz'
 
+    ident_name = model.name + "_" + coord 
+
+    # save correct hits
+    correct_new = list(correct)
+    correct_new.append(tolerance)
+    save_numpy_values(correct_new, output_encry, 'correct_%s.npy' % ident_name)
+
     # save results in a file    
     orig_stdout = sys.stdout
 
@@ -203,8 +218,10 @@ def main():
     print("\t Tracks        : ", len(X_test))
     print("\t Model saved   : ", model.save_fnameh5) 
     print("\t Coordenates   : ", coord) 
-    print("\t Model stand   : ", model.normalise)
-    print("\t Total correct : ", correct)
+    print("\t Model Scaled   : ", model.normalise)
+    print("\t Model Optimizer : ", optim)
+    print("\t Model Neurons   : ", neurons)   
+    print("\t Total correct %s with tolerance=%s: " % (correct, tolerance))
     print("\t Total porcentage correct :", [(t*100)/len(X_test) for t in correct]) 
 
     
@@ -219,9 +236,7 @@ def main():
     summarize_scores_axes(mses, rmses, r2s)
 
     sys.stdout = orig_stdout
-    f.close()    
-
-
+    f.close()
 
     # call this function againt with normalise False
     #x_true, y_true = data.get_testing_data(n_hit_in=time_steps, n_hit_out=1,
@@ -229,22 +244,22 @@ def main():
 
     if cylindrical:
 
-        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_cylin.csv' % configs['model']['name']),
+        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_cylin_%s.csv' % (configs['model']['name'], type_pred)),
                     header=False, index=False)
-        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_cylin.csv' % configs['model']['name']),
+        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_cylin_%s.csv' % (configs['model']['name'], type_pred)),
                     header=False, index=False)
-        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_cylin.csv' % configs['model']['name']),
+        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_cylin_%s.csv' % (configs['model']['name'], type_pred)),
                     header=False, index=False)
     else:
 
-        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_xyz.csv' % configs['model']['name']),
+        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_xyz_%s.csv' % (configs['model']['name'],type_pred)),
                     header=False, index=False)
-        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_xyz.csv' % configs['model']['name']),
+        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_xyz_%s.csv' % (configs['model']['name'], type_pred)),
                     header=False, index=False)
-        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_xyz.csv' % configs['model']['name']),
+        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_xyz_%s.csv' % (configs['model']['name'], type_pred)),
                     header=False, index=False)
 
-    print('[Output] All results saved at %s directory and results.txt file. Please use notebooks/plot_prediction.ipynb' % output_encry)
+    print('[Output] All results saved at %s directory at results-test.txt file. Please use notebooks/plot_prediction.ipynb' % output_encry)
 
 if __name__=='__main__':
     main()

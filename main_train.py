@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument('--config', type=str, default="config.json", help='Configuration file')
     parser.add_argument('--dataset', type=str, help='Path to dataset')
     parser.add_argument('--cylindrical', type=str, help='Type of Coordenates system')
+    parser.add_argument('--load', type=str, help='this param load model')
+        
     # parse the arguments
     args = parser.parse_args()
 
@@ -80,8 +82,8 @@ def main():
     if os.path.isdir(output_path) == False: 
         os.mkdir(output_path)
          
-        if os.path.isdir(output_encry) == False: 
-            os.mkdir(output_encry)
+    if os.path.isdir(output_encry) == False: 
+        os.mkdir(output_encry)
 
     if os.path.isdir(output_logs) == False:
         os.mkdir(output_logs)        
@@ -94,6 +96,12 @@ def main():
     normalise = configs['data']['normalise'] 
     num_hits = configs['data']['num_hits']
     model_name = configs['model']['name']
+    optim = configs['model']['optimizer']
+    neurons = configs['model']['layers'][0]['neurons']
+    loadModel = configs['training']['load_model']
+    validation_split = configs['training']['validation']
+    epochs = configs['training']['epochs']
+    batch = configs['training']['batch_size']
 
     if args.dataset is not None:
         data_file = args.dataset
@@ -101,6 +109,9 @@ def main():
     if args.cylindrical is not None:
         cylindrical = True if args.cylindrical == "True" else False
         configs['data']['cylindrical'] = cylindrical    
+    if args.load is not None:
+        loadModel = True if args.load == "True" else False
+        configs['training']['load_model'] = loadModel 
 
     # prepare data set
     data = Dataset(data_file, split, cylindrical, num_hits, KindNormalization.Zscore)
@@ -124,10 +135,17 @@ def main():
         print('Please instance model')
         return
 
-    loadModel = configs['training']['load_model']
+
     show_metrics = configs['training']['show_metrics']
     report = ""
+    
+    if cylindrical:
+        coord = 'cylin'
+    else:
+        coord = 'xyz'
 
+    ident_name = model.name + "_" + coord 
+        
     if loadModel == False:
         # if exist, please used the compiled model!
         if model.exist_model(model.save_fnameh5):
@@ -136,31 +154,27 @@ def main():
             return
 
         model.build_model()
-        save_fname = os.path.join(output_encry, 'architecture_%s.png' % model_name)
+        save_fname = os.path.join(output_encry, 'architecture_%s.png' % ident_name)
         model.save_architecture(save_fname) 
         # in-memory training
         history = model.train(
             x=X_train,
             y=y_train,
-            epochs = configs['training']['epochs'],
-            batch_size = configs['training']['batch_size']
+            validation = validation_split,
+            epochs = epochs,
+            batch_size = batch
         )
         #if show_metrics:
-        report = evaluate_training(history, output_encry)
+        report = evaluate_training(history, output_encry, ident_name)
 
     elif loadModel == True:       
         if not model.load_model():
             print ('[Error] please change the config file : load_model')
             return
     
-    if cylindrical:
-        coord = 'cylin'
-    else:
-        coord = 'xyz'
-
     # save results in a file    
     orig_stdout = sys.stdout
-    f = open('results/results-train.txt', 'a')
+    f = open(os.path.join(output_encry, 'results-train.txt'), 'a')
     sys.stdout = f        
 
     print("[Output] Train results ")
@@ -171,12 +185,16 @@ def main():
     print("\t Path saved        : ", model.save_fnameh5) 
     print("\t Coordenate type   : ", coord) 
     print("\t Model scaled      : ", model.normalise)
+    print("\t Model Optimizer   : ", optim)
+    print("\t Model batch_size  : ", batch)
+    print("\t Model epochs      : ", epochs)
+
     print("\t Accuracy          : ", report) 
     
     sys.stdout = orig_stdout
     f.close()    
     
-    print('[Output] All results saved at %s directory and results.txt file. Please use notebooks/plot_prediction.ipynb' % output_path)    
+    print('[Output] All results saved at %s directory at results-train.txt file. Please use notebooks/plot_prediction.ipynb' % output_path)    
 
 
 if __name__=='__main__':
