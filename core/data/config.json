@@ -1,6 +1,7 @@
 {
     "create": {
-        "lib_path" : "/data/jfialho/git/2020/new/used/track-ml/utils/",
+        "lib_path" : "../utils/",
+	"lib_path_working" : "/data/jfialho/git/2020/old/new/used/track-ml/utils/",
         "input_dir" : "/data/trackMLDB/train/train_2/",
         "output_dir" : "/data/track-ml/eramia/test/",
 	"begin_id" : 2820,
@@ -19,7 +20,8 @@
     },	    
     "join": {
 	"datasets_dir": "/data/track-ml/eramia/test/",
-	"output_path":"/data/track-ml/eramia/test/eta-05_05.csv",
+	"output_path":"/data/track-ml/eramia/test/",
+	"output_filename":"NOVO.csv",
 	"n_split":1000000000000
     }
 }

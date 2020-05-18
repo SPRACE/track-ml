@@ -36,11 +36,6 @@ def main():
 
     lib_path = configs['create']['lib_path']
     
-    print(lib_path)
-
-    #sys.path.append(lib_path)
-    #from tracktop import *
-
     begin_id = int(configs['create']['begin_id'])
     end_id = int(configs['create']['end_id'])
     n_cores = int(configs['create']['n_cores'])

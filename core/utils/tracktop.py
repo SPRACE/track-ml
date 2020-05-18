@@ -16,7 +16,7 @@ from trackml.dataset import load_dataset
 from trackml.randomize import shuffle_hits
 from trackml.score import score_event
 
-from .transformation import * 
+from transformation import * 
 
 #parameters for error
 default_err = 0.03
