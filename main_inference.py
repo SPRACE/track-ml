@@ -7,6 +7,7 @@ import os
 import argparse
 import json
 
+import datetime as dt
 from core.data.data_loader import *
 from core.models.lstm import ModelLSTM, ModelLSTMParalel, ModelLSTMCuDnnParalel
 from core.models.cnn import ModelCNN
@@ -29,6 +30,8 @@ def parse_args():
     parser.add_argument('--dataset', type=str, help='Path to dataset')
     parser.add_argument('--cylindrical', type=str, help='Type of Coordenates system')
     parser.add_argument('--load', type=str, help='this param load model')
+    parser.add_argument('--normalise', type=str, help='normalise input data')
+    parser.add_argument('--typeopt', type=str, help='type of optimization of predicted value')
     
     # parse the arguments
     args = parser.parse_args()
@@ -65,6 +68,35 @@ def main():
     output_logs = configs['paths']['log_dir']
     data_file = configs['data']['filename']
 
+    time_steps =  configs['model']['layers'][0]['input_timesteps']  # the number of points or hits
+    num_features = configs['model']['layers'][0]['input_features']  # the number of features of each hits
+    optim = configs['model']['optimizer']
+
+    split = configs['data']['train_split']  # the number of features of each hits
+    cylindrical = configs['data']['cylindrical']  # set to polar or cartesian coordenates
+    normalise = configs['data']['normalise'] 
+    num_hits = configs['data']['num_hits']
+    type_opt = configs['testing']['type_optimization']
+    tolerance = configs['testing']['tolerance']
+    loadModel = configs['training']['load_model']
+
+    # we set preference to params by bash commands
+    if args.dataset is not None:
+        data_file = args.dataset
+        configs['data']['filename'] = data_file     
+    if args.cylindrical is not None:
+        cylindrical = True if args.cylindrical == "True" else False
+        configs['data']['cylindrical'] = cylindrical    
+    if args.load is not None:
+        loadModel = True if args.load == "True" else False
+        configs['training']['load_model'] = loadModel  
+    if args.normalise is not None:
+        normalise = True if args.normalise == "True" else False
+        configs['data']['normalise'] = normalise  
+    if args.typeopt is not None:
+        type_opt = args.typeopt
+        configs['testing']['type_optimization'] = type_opt  
+    
     #create a encryp name for dataset
     path_to, filename = os.path.split(data_file)
 
@@ -82,31 +114,7 @@ def main():
         os.mkdir(output_encry)
 
     if os.path.isdir(output_logs) == False:
-        os.mkdir(output_logs)      
-    
-    time_steps =  configs['model']['layers'][0]['input_timesteps']  # the number of points or hits
-    num_features = configs['model']['layers'][0]['input_features']  # the number of features of each hits
-    optim = configs['model']['optimizer']
-    neurons = configs['model']['layers'][0]['neurons']
-
-    split = configs['data']['train_split']  # the number of features of each hits
-    cylindrical = configs['data']['cylindrical']  # set to polar or cartesian coordenates
-    normalise = configs['data']['normalise'] 
-    num_hits = configs['data']['num_hits']
-    type_pred = configs['testing']['type_prediction']
-    tolerance = configs['testing']['tolerance']
-    loadModel = configs['training']['load_model']
-
-    # we set preference to params by bash commands
-    if args.dataset is not None:
-        data_file = args.dataset
-        configs['data']['filename'] = data_file     
-    if args.cylindrical is not None:
-        cylindrical = True if args.cylindrical == "True" else False
-        configs['data']['cylindrical'] = cylindrical    
-    if args.load is not None:
-        loadModel = True if args.load == "True" else False
-        configs['training']['load_model'] = loadModel  
+        os.mkdir(output_logs)        
 
     model = manage_models(configs)
 
@@ -154,24 +162,25 @@ def main():
     correct = [0]
     y_pred = None
     if cylindrical:
-        if type_pred == "normal":
-            y_pred = model.predict_full_sequences(X_test_, data, num_hits=6, normalise=True)
-        elif type_pred == "nearest":                 
+        if type_opt == "normal":
+            y_pred = model.predict_full_sequences(X_test_, data, num_hits=6, normalise=normalise)
+        elif type_opt == "nearest":                 
             # get data in coord cartesian
             data_tmp = Dataset(data_file, split, False, num_hits, KindNormalization.Zscore)
 
+            # for cylindrical True always we need the data as original values with normalise False
             X_test_aux, y_test_aux = data_tmp.get_testing_data(n_hit_in=time_steps, n_hit_out=1,
                                              n_features=num_features, normalise=False)        
             y_pred, correct = model.predict_full_sequences_nearest(X_test_, y_test, data, BagOfHits.Layer, y_test_aux, seq_len, 
-                                                                 normalise=True, cylindrical=cylindrical,
-                                                                 verbose=False)
+                                                                 normalise=normalise, cylindrical=True,
+                                                                 verbose=False, tol=tolerance)
 
     else:
-        if type_pred == "normal":
-            y_pred = model.predict_full_sequences(X_test_, data, num_hits=6, normalise=True)
-        elif type_pred == "nearest": 
+        if type_opt == "normal":
+            y_pred = model.predict_full_sequences(X_test_, data, num_hits=6, normalise=normalise)
+        elif type_opt == "nearest": 
             y_pred, correct = model.predict_full_sequences_nearest(X_test_, y_test, data, BagOfHits.Layer, None, seq_len, 
-                                                             normalise=True, cylindrical=False,
+                                                             normalise=normalise, cylindrical=False,
                                                              verbose=False, tol=tolerance)
         else:
             print('no algorithm defined to predict')
@@ -210,17 +219,19 @@ def main():
 
     f = open(os.path.join(output_encry, 'results-test.txt'), 'a')
     sys.stdout = f        
+    now = dt.datetime.now()
 
     print("[Output] Results ")
     print("---Parameters--- ")
     print("\t Model Name    : ", model.name)
     print("\t Dataset       : ", model.orig_ds_name)
     print("\t Tracks        : ", len(X_test))
-    print("\t Model saved   : ", model.save_fnameh5) 
+    print("\t Model saved   : ", model.save_fnameh5)
+    print("\t Test date     : ", now.strftime("%d/%m/%Y %H:%M:%S")) 
     print("\t Coordenates   : ", coord) 
     print("\t Model Scaled   : ", model.normalise)
     print("\t Model Optimizer : ", optim)
-    print("\t Model Neurons   : ", neurons)   
+    print("\t Prediction Opt  : ", type_opt)
     print("\t Total correct %s with tolerance=%s: " % (correct, tolerance))
     print("\t Total porcentage correct :", [(t*100)/len(X_test) for t in correct]) 
 
@@ -244,19 +255,19 @@ def main():
 
     if cylindrical:
 
-        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_cylin_%s.csv' % (configs['model']['name'], type_pred)),
+        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_cylin_%s.csv' % (configs['model']['name'], type_opt)),
                     header=False, index=False)
-        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_cylin_%s.csv' % (configs['model']['name'], type_pred)),
+        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_cylin_%s.csv' % (configs['model']['name'], type_opt)),
                     header=False, index=False)
-        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_cylin_%s.csv' % (configs['model']['name'], type_pred)),
+        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_cylin_%s.csv' % (configs['model']['name'], type_opt)),
                     header=False, index=False)
     else:
 
-        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_xyz_%s.csv' % (configs['model']['name'],type_pred)),
+        y_test.to_csv(os.path.join(output_encry, 'y_true_%s_xyz_%s.csv' % (configs['model']['name'],type_opt)),
                     header=False, index=False)
-        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_xyz_%s.csv' % (configs['model']['name'], type_pred)),
+        y_predicted.to_csv(os.path.join(output_encry, 'y_pred_%s_xyz_%s.csv' % (configs['model']['name'], type_opt)),
                     header=False, index=False)
-        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_xyz_%s.csv' % (configs['model']['name'], type_pred)),
+        X_test.to_csv(os.path.join(output_encry, 'x_true_%s_xyz_%s.csv' % (configs['model']['name'], type_opt)),
                     header=False, index=False)
 
     print('[Output] All results saved at %s directory at results-test.txt file. Please use notebooks/plot_prediction.ipynb' % output_encry)

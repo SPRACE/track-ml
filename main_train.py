@@ -8,6 +8,7 @@ import argparse
 import json
 
 from sklearn.model_selection import train_test_split
+import datetime as dt
 
 from core.data.data_loader import *
 from core.models.lstm import ModelLSTM, ModelLSTMParalel, ModelLSTMCuDnnParalel
@@ -66,6 +67,32 @@ def main():
     output_path = configs['paths']['save_dir']
     output_logs = configs['paths']['log_dir']
     data_file = configs['data']['filename']
+    time_steps =  configs['model']['layers'][0]['input_timesteps']  # the number of points or hits
+    num_features = configs['model']['layers'][0]['input_features']  # the number of features of each hits
+
+    split = configs['data']['train_split']  # the number of features of each hits
+    cylindrical = configs['data']['cylindrical']  # set to polar or cartesian coordenates
+    normalise = configs['data']['normalise'] 
+    num_hits = configs['data']['num_hits']
+    model_name = configs['model']['name']
+    optim = configs['model']['optimizer']
+    arch = configs['model']['layers']
+    loadModel = configs['training']['load_model']
+    validation_split = configs['training']['validation']
+    epochs = configs['training']['epochs']
+    batch = configs['training']['batch_size']
+    shuffle_train = configs['training']['shuffle']
+
+
+    if args.dataset is not None:
+        data_file = args.dataset
+        configs['data']['filename'] = data_file     
+    if args.cylindrical is not None:
+        cylindrical = True if args.cylindrical == "True" else False
+        configs['data']['cylindrical'] = cylindrical    
+    if args.load is not None:
+        loadModel = True if args.load == "True" else False
+        configs['training']['load_model'] = loadModel 
 
     #create a encryp name for dataset
     path_to, filename = os.path.split(data_file)
@@ -88,31 +115,6 @@ def main():
     if os.path.isdir(output_logs) == False:
         os.mkdir(output_logs)        
     
-    time_steps =  configs['model']['layers'][0]['input_timesteps']  # the number of points or hits
-    num_features = configs['model']['layers'][0]['input_features']  # the number of features of each hits
-
-    split = configs['data']['train_split']  # the number of features of each hits
-    cylindrical = configs['data']['cylindrical']  # set to polar or cartesian coordenates
-    normalise = configs['data']['normalise'] 
-    num_hits = configs['data']['num_hits']
-    model_name = configs['model']['name']
-    optim = configs['model']['optimizer']
-    neurons = configs['model']['layers'][0]['neurons']
-    loadModel = configs['training']['load_model']
-    validation_split = configs['training']['validation']
-    epochs = configs['training']['epochs']
-    batch = configs['training']['batch_size']
-
-    if args.dataset is not None:
-        data_file = args.dataset
-        configs['data']['filename'] = data_file     
-    if args.cylindrical is not None:
-        cylindrical = True if args.cylindrical == "True" else False
-        configs['data']['cylindrical'] = cylindrical    
-    if args.load is not None:
-        loadModel = True if args.load == "True" else False
-        configs['training']['load_model'] = loadModel 
-
     # prepare data set
     data = Dataset(data_file, split, cylindrical, num_hits, KindNormalization.Zscore)
 
@@ -160,9 +162,10 @@ def main():
         history = model.train(
             x=X_train,
             y=y_train,
-            validation = validation_split,
-            epochs = epochs,
-            batch_size = batch
+            validation=validation_split,
+            epochs=epochs,
+            batch_size=batch,
+            shuffle=shuffle_train
         )
         #if show_metrics:
         report = evaluate_training(history, output_encry, ident_name)
@@ -177,6 +180,7 @@ def main():
     f = open(os.path.join(output_encry, 'results-train.txt'), 'a')
     sys.stdout = f        
 
+    now = dt.datetime.now()
     print("[Output] Train results ")
     print("---Parameters--- ")
     print("\t Model Name        : ", model.name)
@@ -184,17 +188,18 @@ def main():
     print("\t Total tracks      : ", len(X_train))
     print("\t Path saved        : ", model.save_fnameh5) 
     print("\t Coordenate type   : ", coord) 
+    print("\t Compiled date     : ", now.strftime("%d/%m/%Y %H:%M:%S"))    
     print("\t Model scaled      : ", model.normalise)
     print("\t Model Optimizer   : ", optim)
     print("\t Model batch_size  : ", batch)
     print("\t Model epochs      : ", epochs)
-
-    print("\t Accuracy          : ", report) 
+    print("\t Accuracy          : ", report)
+    print("\t Architecture      : ", arch)
     
     sys.stdout = orig_stdout
     f.close()    
     
-    print('[Output] All results saved at %s directory at results-train.txt file. Please use notebooks/plot_prediction.ipynb' % output_path)    
+    print('[Output] All results saved at %s directory it results-train.txt file. Please use notebooks/plot_prediction.ipynb' % output_encry)    
 
 
 if __name__=='__main__':
