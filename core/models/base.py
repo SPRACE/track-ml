@@ -13,13 +13,13 @@ from scipy.spatial import distance
 
 import tensorflow as tf
 import keras.backend as K
-from keras.backend.tensorflow_backend import set_session
+#from keras.backend.tensorflow_backend import set_session
 from keras.models import Sequential, load_model
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.utils import plot_model   
 
 from core.utils.utils import *
-
+from core.models.gaussian_loss import gaussian_loss, gaussian_nll
 
 class BagOfHits(Enum):
     All=1,
@@ -36,6 +36,7 @@ class BaseModel():
         self.batch_size = configs['training']['batch_size']
         self.validation = configs['training']['validation']
         self.earlystopping = configs['training']['earlystopping']
+        self.stopped_epoch = 0
 
         path_to, filename = os.path.split(configs['data']['filename'])
         #print(get_unique_name(filename))
@@ -62,18 +63,38 @@ class BaseModel():
         self.save_fname = os.path.join(configs['paths']['save_dir'], 'architecture-%s.png' % self.name)
 
         self.save = configs['training']['save_model']
-        
+
         if configs['training']['use_gpu'] == True:
-            #config = tf.ConfigProto( device_count = {'GPU': 0 , 'CPU': 0} ) 
-            config = tf.ConfigProto()
-            config.gpu_options.allow_growth = True
-            sess = tf.Session(config=config) 
-            set_session(sess)
-            tf.device('/gpu:0')
+            #if tf.test.is_gpu_available():
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+
+            if gpus:
+                try:
+                    # Currently, memory growth needs to be the same across GPUs
+                    for gpu in gpus:
+                        tf.config.experimental.set_memory_growth(gpu, True)
+                        print('[Model] Set memory growth for %s to True', gpu)
+
+                    logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+                    print("[Model] ", len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+                except RuntimeError as e:
+                    # Memory growth must be set before GPUs have been initialized
+                    print(e)
         else:
-            config=tf.ConfigProto(log_device_placement=True)
-            sess = tf.Session(config=config)
-            set_session(sess)
+            print('No GPU configured.')
+            pass
+
+        # if configs['training']['use_gpu'] == True:
+        #     #config = tf.ConfigProto( device_count = {'GPU': 0 , 'CPU': 0} ) 
+        #     config = tf.ConfigProto()
+        #     config.gpu_options.allow_growth = True
+        #     sess = tf.Session(config=config) 
+        #     set_session(sess)
+        #     tf.device('/gpu:0')
+        # else:
+        #     config=tf.ConfigProto(log_device_placement=True)
+        #     sess = tf.Session(config=config)
+        #     set_session(sess)
         
         #set_random_seed(42)
         tf.compat.v1.set_random_seed(0)
@@ -81,7 +102,7 @@ class BaseModel():
     def load_model(self):
         if self.exist_model(self.save_fnameh5):
             print('[Model] Loading model from file %s' % self.save_fnameh5)
-            self.model = load_model(self.save_fnameh5)
+            self.model = load_model(self.save_fnameh5, custom_objects={'gaussian_loss': gaussian_loss, 'gaussian_nll': gaussian_nll})
             return True
         else:
             print('[Model] Can not load the model from file %s' % self.save_fnameh5)
@@ -101,38 +122,47 @@ class BaseModel():
         self.model.save(filepath)
         print('[Model] Model for inference saved at %s' % filepath)
 
-    def train(self, x, y, epochs, batch_size, validation, shuffle=False):
+    def train(self, x, y, epochs, batch_size, validation, shuffle=False, verbose=False, callbacks=None):
         timer = Timer()
         timer.start()
         print('[Model] Training Started')
         print('[Model] %s epochs, %s batch size' % (epochs, batch_size))
         #print('[Model] Shape of data train: ', x.shape) 
         #save_fname = os.path.join(save_dir, '%s-e%s.h5' % (dt.datetime.now().strftime('%d%m%Y-%H%M%S'), str(epochs)))
-        callbacks = None
-
-        if self.earlystopping:           
-            callbacks = [
-                EarlyStopping(monitor='loss', mode='min', verbose=1),
-                ModelCheckpoint(filepath=self.save_fnameh5, monitor='val_loss', mode='min', save_best_only=True)
-            ]
+        
+        if callbacks is None:
+            print('DEBUG')
+            if self.earlystopping:
+                callbacks = [
+                    EarlyStopping(monitor='loss', mode='min', verbose=1),
+                    ModelCheckpoint(filepath=self.save_fnameh5, monitor='val_loss', mode='min', save_best_only=True)
+                ]
+            else:
+                callbacks = [
+                    ModelCheckpoint(filepath=self.save_fnameh5, monitor='val_loss', mode='min', save_best_only=True)
+                ]
         else:
-            callbacks = [
-                ModelCheckpoint(filepath=self.save_fnameh5, monitor='val_loss', mode='min', save_best_only=True)
-            ]
+            pass
 
         history = self.model.fit(
             x,
             y,
+            verbose=verbose,
             validation_split=validation,
             epochs=epochs,
             batch_size=batch_size,
-            callbacks=callbacks,
-            shuffle=shuffle
+            shuffle=shuffle,
+            callbacks=callbacks
         )
 
         if self.save == True:
             self.save_model(self.save_fnameh5)             
-       
+
+        # what epocks the algorith stopped
+        if self.earlystopping:        
+            self.stopped_epoch = callbacks[0].stopped_epoch
+            
+        print('[Model] Model training stopped at %s epoch' % self.stopped_epoch)
         print('[Model] Training Completed. Model h5 saved as %s' % self.save_fnameh5)
         print('[Model] Model train with structure:', self.model.inputs)
         timer.stop()
@@ -275,8 +305,8 @@ class BaseModel():
 
         return pred_sequences
 
-    def predict_full_sequences_nearest(self, x_test, y_test, data, bag_of_hits, y_test_aux=None, num_hits=6, num_features=3,
-                                        normalise=False, cylindrical=False, verbose=False, tol=0.01):
+    def predict_full_sequences_nearest(self, x_test, y_test, data, bag_of_hits, y_test_aux=None, num_hits=6, num_features=3, 
+                                        num_obs=4, normalise=False, cylindrical=False, verbose=False, tol=0.01):
         
         '''
             This function shift the window by 1 new prediction each time, re-run predictions on new window
@@ -297,14 +327,13 @@ class BaseModel():
 
         pred_sequences = []
         pred_sequences_orig = []
-        
-        decimals = 2
-       
+               
         # covert to original values
         #y_true = data.inverse_transform_test_y(y_test)
         #y_true = y_true.round(decimals)
         
         #change the dataset by cartesian coordinates
+        y_test_cpy = y_test        
         if cylindrical:
             y_test = y_test_aux
         else:
@@ -313,6 +342,7 @@ class BaseModel():
         # bag_of_hits  
         bag_of_hits_all = np.array(convert_matrix_to_vec(y_test, num_features))
 
+        count_correct_nearest = np.zeros(num_hits)
         count_correct = np.zeros(num_hits)
         begin_idx, end_idx = 0, 0
         num_boh = 6
@@ -332,6 +362,7 @@ class BaseModel():
                 # bag_of_hit by layer
                 end = begin+num_features
                 curr_layer = np.array(y_test.iloc[0:,begin:end]).reshape(total, num_features)
+                curr_layer_polar = np.array(y_test_cpy.iloc[0:,begin:end]).reshape(total, num_features)
                 curr_hit = curr_track[i]
                 begin = end
                 
@@ -340,10 +371,10 @@ class BaseModel():
                     print('input:\n', curr_frame)
                 
                 if normalise:
-                    curr_frame = data.x_scaler.transform(np.reshape(curr_frame,(1,12)))
+                    curr_frame = data.x_scaler.transform(np.reshape(curr_frame,(1, num_obs*num_features)))
                     curr_frame_orig = data.inverse_transform_x(pd.DataFrame(curr_frame).values.flatten())
-                    curr_frame_orig = np.reshape(curr_frame_orig, (4,3))
-                    curr_frame = np.reshape(curr_frame, (4,3))
+                    curr_frame_orig = np.reshape(curr_frame_orig, (num_obs,num_features))
+                    curr_frame = np.reshape(curr_frame, (num_obs, num_features))
                 else:
                     curr_frame = curr_frame
                     curr_frame_orig = curr_frame
@@ -358,13 +389,13 @@ class BaseModel():
                 y_pred = self.model.predict(curr_frame[np.newaxis,:,:], batch_size=self.batch_size)
 
                 
-                y_pred = np.reshape(y_pred, (1, 3))
+                y_pred = np.reshape(y_pred, (1, num_features))
                 if normalise:
                     y_pred_orig = data.inverse_transform_y(y_pred)
                 else:
                     y_pred_orig = y_pred
 
-                y_pred_orig = np.reshape(y_pred_orig, (1, 3))
+                y_pred_orig = np.reshape(y_pred_orig, (1, num_features))
 
                 if bag_of_hits == BagOfHits.All:
                     hits = bag_of_hits_all
@@ -391,8 +422,12 @@ class BaseModel():
                 # if curr_hit is in cartesian coord, near_pred must be in cartesian coord too
                 # very small numbers are differents or equals
                 if np.isclose(curr_hit, near_pred, atol=tol).all():
-                    count_correct[i]+=1
-                    
+                    count_correct_nearest[i]+=1
+
+                # counting with predicted without nearest hit
+                if np.isclose(curr_hit, y_pred_orig, atol=tol).all():
+                    count_correct[i]+=1 
+
                 if verbose:
                     print('pred:', y_pred)
                     print('inv pred:', y_pred_orig)
@@ -407,7 +442,11 @@ class BaseModel():
                     near_pred[0] = rho
                     near_pred[1] = eta
                     near_pred[2] = phi
-                    
+
+                # we change to the original input 
+                if cylindrical:
+                    near_pred = curr_layer_polar[idx]
+
                 #curr_track = np.delete(curr_track, idx, 0)
                 #near_pred_orig, idx = model.nearest_hit(y_pred_orig, bag_of_hits, silent=True) 
                         
@@ -429,9 +468,171 @@ class BaseModel():
         print('[Model] Prediction Finished.')
         timer.stop()
 
-        return pred_sequences, count_correct
+        return pred_sequences, count_correct_nearest, count_correct
 
- 
+    def predict_full_sequences_nearest_parallel(self, x_test, y_test, data, bag_of_hits, y_test_aux=None, 
+                                                t_steps=4, t_features=1, n_features=3, num_hits=6,                                          
+                                                normalise=False, cylindrical=False, verbose=False, tol=0.01, metric = 'euclidean'):
+        
+        '''
+            This function shift the window by 1 new prediction each time, re-run predictions on new window
+            parameters:
+            x_test : X test data normaly not scaled (4 hits)
+            y_test : y test data, normaly not scaled (6 hits)
+            num_hits : how many hits by y_test
+            normalise : it param says the input data must be scaled or not
+        
+        '''
+        
+        timer = Timer()
+        timer.start()
+
+        print('[Model] Predicting Sequences with Nearest Started')
+
+        total = len(x_test)
+
+        pred_sequences = []
+        pred_sequences_orig = []
+               
+        # covert to original values
+        #y_true = data.inverse_transform_test_y(y_test)
+        #y_true = y_true.round(decimals)
+        
+        #change the dataset by cartesian coordinates
+        y_test_cpy = y_test
+        if cylindrical:
+            #if cylindrical is true we use cartesian coordinates
+            y_test = y_test_aux
+        else:
+            y_test = y_test
+            
+        # bag_of_hits  
+        bag_of_hits_all = np.array(convert_matrix_to_vec(y_test, n_features))
+
+        count_correct = np.zeros(num_hits)
+        count_correct_nearest = np.zeros(num_hits)
+        begin_idx, end_idx = 0, 0
+        num_boh = 6
+        
+        for j in range(total):
+            curr_frame = x_test[j]
+            # bag_of_hit by track
+            curr_track = np.array(y_test.iloc[j,0:]).reshape(num_hits, n_features)
+            
+            if verbose:
+                print('curr_track %s , %s:' % (j , curr_track))
+
+            predicted = []
+            predicted_orig = []
+            begin = 0
+            for i in range(num_hits):
+                # bag_of_hit by layer
+                end = begin+n_features
+
+                curr_layer = np.array(y_test.iloc[0:,begin:end]).reshape(total, n_features)
+                curr_layer_polar = np.array(y_test_cpy.iloc[0:,begin:end]).reshape(total, n_features)
+
+                curr_hit = curr_track[i]
+                begin = end
+                
+                if verbose:
+                    # primeira esta em originais
+                    print('input:\n', curr_frame)
+                    
+                if normalise:
+                    curr_frame = data.x_scaler.transform(np.reshape(curr_frame,(1,12)))
+                    curr_frame_orig = data.inverse_transform_x(pd.DataFrame(curr_frame).values.flatten())
+                    curr_frame_orig = np.reshape(curr_frame_orig, (t_steps, n_features))
+                    curr_frame = np.reshape(curr_frame, (t_steps, n_features))
+                else:
+                    curr_frame = curr_frame
+                    curr_frame_orig = curr_frame
+
+                x = curr_frame[:, 0].reshape((1, t_steps, t_features))
+                y = curr_frame[:, 1].reshape((1, t_steps, t_features))
+                z = curr_frame[:, 2].reshape((1, t_steps, t_features))
+                
+                if verbose:
+                    print('input:\n', curr_frame)
+                    #print('input orig:\n', curr_frame_orig)
+                
+                #y_pred = model.model.predict(curr_frame[np.newaxis,:,:])
+                y_pred = self.model.predict([x, y, z])
+
+                #y_pred = np.reshape(y_pred, (1, 3))
+                if normalise:
+                    y_pred_orig = data.inverse_transform_y(y_pred)
+                else:
+                    y_pred_orig = y_pred
+
+                y_pred_orig = np.reshape(y_pred_orig, (1, 3))
+
+                if bag_of_hits == BagOfHits.All:
+                    hits = bag_of_hits_all
+                elif bag_of_hits == BagOfHits.Track:
+                    hits = curr_track
+                elif bag_of_hits == BagOfHits.Layer:                    
+                    hits = curr_layer
+                
+                # if output of predict is cylindrical, we convert to cartesian temporaly to calculate distance
+                if cylindrical:
+                    rho, eta, phi = y_pred_orig[0][0], y_pred_orig[0][1], y_pred_orig[0][2]
+                    #print(rho,eta,phi)
+                    x, y, z = convert_rhoetaphi_to_xyz(rho, eta, phi)
+                    #print(x,y,z)
+                    y_pred_orig[0][0] = x
+                    y_pred_orig[0][1] = y
+                    y_pred_orig[0][2] = z
+                    
+                # the distances is calculate with always with cartesian
+                dist = distance.cdist(hits, y_pred_orig, metric)
+                idx = np.argmin(dist)
+                near_pred = hits[idx]
+
+                # if curr_hit is in cartesian coord, near_pred must be in cartesian coord too
+                if np.isclose(curr_hit, near_pred, atol=tol).all():
+                    count_correct_nearest[i]+=1
+                    
+                # counting with predicted without nearest hit
+                if np.isclose(curr_hit, y_pred_orig, atol=tol).all():
+                    count_correct[i]+=1 
+                    
+                if verbose:
+                    print('pred:', y_pred)
+                    print('inv pred:', y_pred_orig)
+                    print('current:', curr_hit)
+                    print('nearest:', near_pred)
+                '''
+                if cylindrical:
+                    x, y, z = near_pred[0], near_pred[1], near_pred[2]
+                    #print(x,y,z)
+                    rho, eta, phi = convert_xyz_to_rhoetaphi(x, y, z)
+                    #print(rho,eta,phi)
+                    near_pred[0] = rho
+                    near_pred[1] = eta
+                    near_pred[2] = phi
+                '''         
+                # we change to the original input 
+                if cylindrical:
+                    near_pred = curr_layer_polar[idx]
+
+                #near adiciona em valores originaeis
+                predicted.append(near_pred)
+                           
+                curr_frame = curr_frame_orig[1:]
+                curr_frame = np.insert(curr_frame, [3], predicted[-1], axis=0)
+                           
+            pred_sequences.append(predicted)
+            #pred_sequences_orig.append(predicted_orig)
+            
+            if verbose:
+                if j == 3: break
+                    
+        print('[Model] Prediction Finished.')
+        timer.stop()
+
+        return pred_sequences, count_correct_nearest, count_correct
+
     def nearest_hit(self, hit, hits,
                              silent = True,
                              dist_hit = False,
